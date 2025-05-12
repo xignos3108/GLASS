@@ -51,7 +51,7 @@ class GLASS(torch.nn.Module):
             patchstride=1,
             meta_epochs=640,
             eval_epochs=1,
-            dsc_layers=2,
+            dsc_layers=3,
             dsc_hidden=1024,
             dsc_margin=0.5,
             train_backbone=False,
@@ -124,10 +124,11 @@ class GLASS(torch.nn.Module):
         self.dataset_name = ""
         self.logger = None
 
-    def set_model_dir(self, model_dir, dataset_name):
+    def set_model_dir(self, model_dir):
         self.model_dir = model_dir
         os.makedirs(self.model_dir, exist_ok=True)
-        self.ckpt_dir = os.path.join(self.model_dir, dataset_name)
+        # self.ckpt_dir = os.path.join(self.model_dir, dataset_name)
+        self.ckpt_dir = self.model_dir
         os.makedirs(self.ckpt_dir, exist_ok=True)
         self.tb_dir = os.path.join(self.ckpt_dir, "tb")
         os.makedirs(self.tb_dir, exist_ok=True)
@@ -185,7 +186,7 @@ class GLASS(torch.nn.Module):
 
         return patch_features, patch_shapes
 
-    def trainer(self, training_data, val_data, name):
+    def trainer(self, training_data, val_data, name="glass"):
         state_dict = {}
         ckpt_path = glob.glob(self.ckpt_dir + '/ckpt_best*')
         ckpt_path_save = os.path.join(self.ckpt_dir, "ckpt.pth")
@@ -202,49 +203,49 @@ class GLASS(torch.nn.Module):
                     k: v.detach().cpu()
                     for k, v in self.pre_projection.state_dict().items()})
 
-        self.distribution = training_data.dataset.distribution
-        xlsx_path = './datasets/excel/' + name.split('_')[0] + '_distribution.xlsx'
-        try:
-            if self.distribution == 1:  # rejudge by image-level spectrogram analysis
-                self.distribution = 1
-                self.svd = 1
-            elif self.distribution == 2:  # manifold
-                self.distribution = 0
-                self.svd = 0
-            elif self.distribution == 3:  # hypersphere
-                self.distribution = 0
-                self.svd = 1
-            elif self.distribution == 4:  # opposite choose by file
-                self.distribution = 0
-                df = pd.read_excel(xlsx_path)
-                self.svd = 1 - df.loc[df['Class'] == name, 'Distribution'].values[0]
-            else:  # choose by file
-                self.distribution = 0
-                df = pd.read_excel(xlsx_path)
-                self.svd = df.loc[df['Class'] == name, 'Distribution'].values[0]
-        except:
-            self.distribution = 1
-            self.svd = 1
+        # self.distribution = training_data.dataset.distribution
+        # xlsx_path = './datasets/excel/' + name.split('_')[0] + '_distribution.xlsx'
+        # try:
+        #     if self.distribution == 1:  # rejudge by image-level spectrogram analysis
+        #         self.distribution = 1
+        #         self.svd = 1
+        #     elif self.distribution == 2:  # manifold
+        #         self.distribution = 0
+        #         self.svd = 0
+        #     elif self.distribution == 3:  # hypersphere
+        #         self.distribution = 0
+        #         self.svd = 1
+        #     elif self.distribution == 4:  # opposite choose by file
+        #         self.distribution = 0
+        #         df = pd.read_excel(xlsx_path)
+        #         self.svd = 1 - df.loc[df['Class'] == name, 'Distribution'].values[0]
+        #     else:  # choose by file
+        #         self.distribution = 0
+        #         df = pd.read_excel(xlsx_path)
+        #         self.svd = df.loc[df['Class'] == name, 'Distribution'].values[0]
+        # except:
+        #     self.distribution = 1
+        #     self.svd = 1
 
-        # judge by image-level spectrogram analysis
-        if self.distribution == 1:
-            self.forward_modules.eval()
-            with torch.no_grad():
-                for i, data in enumerate(training_data):
-                    img = data["image"]
-                    img = img.to(torch.float).to(self.device)
-                    batch_mean = torch.mean(img, dim=0)
-                    if i == 0:
-                        self.c = batch_mean
-                    else:
-                        self.c += batch_mean
-                self.c /= len(training_data)
+        # # judge by image-level spectrogram analysis
+        # if self.distribution == 1:
+        #     self.forward_modules.eval()
+        #     with torch.no_grad():
+        #         for i, data in enumerate(training_data):
+        #             img = data["image"]
+        #             img = img.to(torch.float).to(self.device)
+        #             batch_mean = torch.mean(img, dim=0)
+        #             if i == 0:
+        #                 self.c = batch_mean
+        #             else:
+        #                 self.c += batch_mean
+        #         self.c /= len(training_data)
 
-            avg_img = utils.torch_format_2_numpy_img(self.c.detach().cpu().numpy())
-            self.svd = utils.distribution_judge(avg_img, name)
-            os.makedirs(f'./results/judge/avg/{self.svd}', exist_ok=True)
-            cv2.imwrite(f'./results/judge/avg/{self.svd}/{name}.png', avg_img)
-            return self.svd
+        #     avg_img = utils.torch_format_2_numpy_img(self.c.detach().cpu().numpy())
+        #     self.svd = utils.distribution_judge(avg_img, name)
+        #     os.makedirs(f'./results/judge/avg/{self.svd}', exist_ok=True)
+        #     cv2.imwrite(f'./results/judge/avg/{self.svd}/{name}.png', avg_img)
+        #     return self.svd
 
         pbar = tqdm.tqdm(range(self.meta_epochs), unit='epoch')
         pbar_str1 = ""
