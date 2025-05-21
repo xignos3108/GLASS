@@ -44,6 +44,8 @@ def compute_pixelwise_retrieval_metrics(anomaly_segmentations, ground_truth_mask
     flat_anomaly_segmentations = anomaly_segmentations.ravel()
     flat_ground_truth_masks = ground_truth_masks.ravel()
 
+    # print(f"seg: {flat_anomaly_segmentations.shape} mask: {flat_ground_truth_masks.shape}") # [13271040, 8028160]
+
     auroc = metrics.roc_auc_score(flat_ground_truth_masks.astype(int), flat_anomaly_segmentations)
     ap = 0. if path == 'training' else metrics.average_precision_score(flat_ground_truth_masks.astype(int), flat_anomaly_segmentations)
 

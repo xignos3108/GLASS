@@ -100,22 +100,26 @@ class MVTecDataset(torch.utils.data.Dataset):
         self.classname = classname
         self.dataset_name = dataset_name
 
-        if self.distribution != 1 and (self.classname == 'toothbrush' or self.classname == 'wood'):
-            self.resize = round(self.imgsize * 329 / 288)
+        # if self.distribution != 1 and (self.classname == 'toothbrush' or self.classname == 'wood'):
+        #     self.resize = round(self.imgsize * 329 / 288)
 
-        xlsx_path = './datasets/excel/' + self.dataset_name + '_distribution.xlsx'
-        if self.fg == 2:  # choose by file
-            try:
-                df = pd.read_excel(xlsx_path)
-                self.class_fg = df.loc[df['Class'] == self.dataset_name + '_' + classname, 'Foreground'].values[0]
-            except:
-                self.class_fg = 1
-        elif self.fg == 1:  # with foreground mask
-            self.class_fg = 1
-        else:  # without foreground mask
-            self.class_fg = 0
+        # xlsx_path = './datasets/excel/' + self.dataset_name + '_distribution.xlsx'
+        # if self.fg == 2:  # choose by file
+        #     try:
+        #         df = pd.read_excel(xlsx_path)
+        #         self.class_fg = df.loc[df['Class'] == self.dataset_name + '_' + classname, 'Foreground'].values[0]
+        #     except:
+        #         self.class_fg = 1
+        # elif self.fg == 1:  # with foreground mask
+        #     self.class_fg = 1
+        # else:  # without foreground mask
+        #     self.class_fg = 0
 
         self.imgpaths_per_class, self.data_to_iterate = self.get_image_data()
+        # self.imgpaths_per_class.values(): 클래스 별 데이터의 경로가 리스트 내 딕셔너리로 반환 (딕셔너리는 anomaly 유형을 key로 가짐)
+        # next(iter(self.imgpaths_per_class.values())): 첫번째 클래스 데이터에 대한 딕셔너리
+        # list(next(iter(self.imgpaths_per_class.values())).values())[0]): 첫번째 클래스 데이터의 경로 첫번째 anomaly 유형 데이터에 대한 경로 리스트
+        # 0 * list(next(iter(self.imgpaths_per_class.values())).values())[0]: 첫번째 클래스 데이터의 경로 첫번째 anomaly 유형 데이터에 대한 경로 리스트 길이만큼 0을 갖는 리스트 반환
         self.anomaly_source_paths = sorted(1 * glob.glob(anomaly_source_path + "/*/*.jpg") +
                                            0 * list(next(iter(self.imgpaths_per_class.values())).values())[0])
 
@@ -183,10 +187,10 @@ class MVTecDataset(torch.utils.data.Dataset):
             else:
                 aug = self.transform_img(aug)
 
-            if self.class_fg:
-                fgmask_path = image_path.split(classname)[0] + 'fg_mask/' + classname + '/' + os.path.split(image_path)[-1]
-                mask_fg = PIL.Image.open(fgmask_path)
-                mask_fg = torch.ceil(self.transform_mask(mask_fg)[0])
+            # if self.class_fg:
+            #     fgmask_path = image_path.split(classname)[0] + 'fg_mask/' + classname + '/' + os.path.split(image_path)[-1]
+            #     mask_fg = PIL.Image.open(fgmask_path)
+            #     mask_fg = torch.ceil(self.transform_mask(mask_fg)[0])
 
             mask_all = perlin_mask(image.shape, self.imgsize // self.downsampling, 0, 6, mask_fg, 1)
             mask_s = torch.from_numpy(mask_all[0])
@@ -228,6 +232,7 @@ class MVTecDataset(torch.utils.data.Dataset):
         for anomaly in anomaly_types:
             anomaly_path = os.path.join(classpath, anomaly)
             anomaly_files = sorted(os.listdir(anomaly_path))
+            # e.g. classname: bottle... anomaly: good, broken_large...
             imgpaths_per_class[self.classname][anomaly] = [os.path.join(anomaly_path, x) for x in anomaly_files]
 
             if self.split == DatasetSplit.TEST and anomaly != "good":
@@ -248,4 +253,5 @@ class MVTecDataset(torch.utils.data.Dataset):
                         data_tuple.append(None)
                     data_to_iterate.append(data_tuple)
 
-        return imgpaths_per_class, data_to_iterate
+        # data_to_iterate는 기본적으로 data_path의 리스트를 의미
+        return imgpaths_per_class, data_to_iterate 
