@@ -183,16 +183,15 @@ class GLASS(torch.nn.Module):
         patch_features = [x.reshape(-1, *x.shape[-3:]) for x in patch_features]
         patch_features = self.forward_modules["preprocessing"](patch_features)
         patch_features = self.forward_modules["preadapt_aggregator"](patch_features)
-
         return patch_features, patch_shapes
 
-    def trainer(self, training_data, val_data, name="glass"):
+    def trainer(self, training_data, val_data):
         state_dict = {}
         ckpt_path = glob.glob(self.ckpt_dir + '/ckpt_best*')
         ckpt_path_save = os.path.join(self.ckpt_dir, "ckpt.pth")
         if len(ckpt_path) != 0:
             LOGGER.info("Start testing, ckpt file found!")
-            return 0., 0., 0., 0., 0., -1.
+            return 0., 0., -1.
 
         def update_state_dict():
             state_dict["discriminator"] = OrderedDict({
@@ -271,31 +270,29 @@ class GLASS(torch.nn.Module):
                         self.c += batch_mean
                 self.c /= len(training_data)
 
+            # print(f"Train Discriminator")
             pbar_str, pt, pf = self._train_discriminator(training_data, i_epoch, pbar, pbar_str1)
             update_state_dict()
 
-            if (i_epoch + 1) % self.eval_epochs == 0:
-                images, scores, segmentations, labels_gt, masks_gt = self.predict(val_data)
-                image_auroc, image_ap, pixel_auroc, pixel_ap, pixel_pro = self._evaluate(images, scores, segmentations,
-                                                                                         labels_gt, masks_gt, name)
+            if i_epoch == 0 or (i_epoch + 1) % self.eval_epochs == 0:
+                # print(f"Validation")
+                images, scores, segmentations, labels_gt = self.predict(val_data)
+                image_auroc, image_ap = self._evaluate(images, scores, segmentations, labels_gt)
 
                 self.logger.logger.add_scalar("i-auroc", image_auroc, i_epoch)
                 self.logger.logger.add_scalar("i-ap", image_ap, i_epoch)
-                self.logger.logger.add_scalar("p-auroc", pixel_auroc, i_epoch)
-                self.logger.logger.add_scalar("p-ap", pixel_ap, i_epoch)
-                self.logger.logger.add_scalar("p-pro", pixel_pro, i_epoch)
 
-                eval_path = './results/eval/' + name + '/'
-                train_path = './results/training/' + name + '/'
+                eval_path = './results/eval/'
+                train_path = './results/training/'
                 if best_record is None:
-                    best_record = [image_auroc, image_ap, pixel_auroc, pixel_ap, pixel_pro, i_epoch]
+                    best_record = [image_auroc, image_ap, i_epoch]
                     ckpt_path_best = os.path.join(self.ckpt_dir, "ckpt_best_{}.pth".format(i_epoch))
                     torch.save(state_dict, ckpt_path_best)
                     shutil.rmtree(eval_path, ignore_errors=True)
                     shutil.copytree(train_path, eval_path)
 
-                elif image_auroc + pixel_auroc > best_record[0] + best_record[2]:
-                    best_record = [image_auroc, image_ap, pixel_auroc, pixel_ap, pixel_pro, i_epoch]
+                elif image_auroc > best_record[0]:
+                    best_record = [image_auroc, image_ap, i_epoch]
                     os.remove(ckpt_path_best)
                     ckpt_path_best = os.path.join(self.ckpt_dir, "ckpt_best_{}.pth".format(i_epoch))
                     torch.save(state_dict, ckpt_path_best)
@@ -304,9 +301,6 @@ class GLASS(torch.nn.Module):
 
                 pbar_str1 = f" IAUC:{round(image_auroc * 100, 2)}({round(best_record[0] * 100, 2)})" \
                             f" IAP:{round(image_ap * 100, 2)}({round(best_record[1] * 100, 2)})" \
-                            f" PAUC:{round(pixel_auroc * 100, 2)}({round(best_record[2] * 100, 2)})" \
-                            f" PAP:{round(pixel_ap * 100, 2)}({round(best_record[3] * 100, 2)})" \
-                            f" PRO:{round(pixel_pro * 100, 2)}({round(best_record[4] * 100, 2)})" \
                             f" E:{i_epoch}({best_record[-1]})"
                 pbar_str += pbar_str1
                 pbar.set_description_str(pbar_str)
@@ -468,10 +462,9 @@ class GLASS(torch.nn.Module):
 
             if sample_num > self.limit:
                 break
-
         return pbar_str2, all_p_true_, all_p_fake_
 
-    def tester(self, test_data, name):
+    def tester(self, test_data):
         ckpt_path = glob.glob(self.ckpt_dir + '/ckpt_best*')
         if len(ckpt_path) != 0:
             state_dict = torch.load(ckpt_path[0], map_location=self.device)
@@ -482,58 +475,36 @@ class GLASS(torch.nn.Module):
             else:
                 self.load_state_dict(state_dict, strict=False)
 
-            images, scores, segmentations, labels_gt, masks_gt = self.predict(test_data)
-            image_auroc, image_ap, pixel_auroc, pixel_ap, pixel_pro = self._evaluate(images, scores, segmentations,
-                                                                                     labels_gt, masks_gt, name, path='eval')
+            images, scores, segmentations, labels_gt = self.predict(test_data)
+            image_auroc, image_ap = self._evaluate(images, scores, segmentations,
+                                                   labels_gt, path='eval')
             epoch = int(ckpt_path[0].split('_')[-1].split('.')[0])
         else:
-            image_auroc, image_ap, pixel_auroc, pixel_ap, pixel_pro, epoch = 0., 0., 0., 0., 0., -1.
+            image_auroc, image_ap, epoch = 0., 0., -1.
             LOGGER.info("No ckpt file found!")
+        return image_auroc, image_ap, epoch
 
-        return image_auroc, image_ap, pixel_auroc, pixel_ap, pixel_pro, epoch
-
-    def _evaluate(self, images, scores, segmentations, labels_gt, masks_gt, name, path='training'):
+    def _evaluate(self, images, scores, segmentations, labels_gt, path='training'):
         scores = np.squeeze(np.array(scores))
         image_scores = metrics.compute_imagewise_retrieval_metrics(scores, labels_gt, path)
         image_auroc = image_scores["auroc"]
         image_ap = image_scores["ap"]
 
-        if len(masks_gt) > 0:
-            segmentations = np.array(segmentations)
-            pixel_scores = metrics.compute_pixelwise_retrieval_metrics(segmentations, masks_gt, path)
-            pixel_auroc = pixel_scores["auroc"]
-            pixel_ap = pixel_scores["ap"]
-            if path == 'eval':
-                try:
-                    pixel_pro = metrics.compute_pro(np.squeeze(np.array(masks_gt)), segmentations)
-                except:
-                    pixel_pro = 0.
-            else:
-                pixel_pro = 0.
-        else:
-            pixel_auroc = -1.
-            pixel_ap = -1.
-            pixel_pro = -1.
-            return image_auroc, image_ap, pixel_auroc, pixel_ap, pixel_pro
-
         defects = np.array(images)
-        targets = np.array(masks_gt)
         for i in range(len(defects)):
             defect = utils.torch_format_2_numpy_img(defects[i])
-            target = utils.torch_format_2_numpy_img(targets[i])
 
             mask = cv2.cvtColor(cv2.resize(segmentations[i], (defect.shape[1], defect.shape[0])),
                                 cv2.COLOR_GRAY2BGR)
             mask = (mask * 255).astype('uint8')
             mask = cv2.applyColorMap(mask, cv2.COLORMAP_JET)
 
-            img_up = np.hstack([defect, target, mask])
-            img_up = cv2.resize(img_up, (256 * 3, 256))
-            full_path = './results/' + path + '/' + name + '/'
+            img_up = np.hstack([defect, mask])
+            img_up = cv2.resize(img_up, (256 * 2, 256))
+            full_path = './results/' + path + '/'
             utils.del_remake_dir(full_path, del_flag=False)
             cv2.imwrite(full_path + str(i + 1).zfill(3) + '.png', img_up)
-
-        return image_auroc, image_ap, pixel_auroc, pixel_ap, pixel_pro
+        return image_auroc, image_ap
 
     def predict(self, test_dataloader):
         """This function provides anomaly scores/maps for full dataloaders."""
@@ -544,14 +515,11 @@ class GLASS(torch.nn.Module):
         scores = []
         masks = []
         labels_gt = []
-        masks_gt = []
 
         with tqdm.tqdm(test_dataloader, desc="Inferring...", leave=False, unit='batch') as data_iterator:
             for data in data_iterator:
                 if isinstance(data, dict):
                     labels_gt.extend(data["is_anomaly"].numpy().tolist())
-                    if data.get("mask_gt", None) is not None:
-                        masks_gt.extend(data["mask_gt"].numpy().tolist())
                     image = data["image"]
                     images.extend(image.numpy().tolist())
                     img_paths.extend(data["image_path"])
@@ -559,8 +527,7 @@ class GLASS(torch.nn.Module):
                 for score, mask in zip(_scores, _masks):
                     scores.append(score)
                     masks.append(mask)
-
-        return images, scores, masks, labels_gt, masks_gt
+        return images, scores, masks, labels_gt
 
     def _predict(self, img):
         """Infer score and mask for a batch of images."""
@@ -572,7 +539,6 @@ class GLASS(torch.nn.Module):
         self.discriminator.eval()
 
         with torch.no_grad():
-
             patch_features, patch_shapes = self._embed(img, provide_patch_shapes=True, evaluation=True)
             if self.pre_proj > 0:
                 patch_features = self.pre_projection(patch_features)
@@ -588,5 +554,57 @@ class GLASS(torch.nn.Module):
             image_scores = self.patch_maker.score(image_scores)
             if isinstance(image_scores, torch.Tensor):
                 image_scores = image_scores.cpu().numpy()
-
         return list(image_scores), list(masks)
+    
+    def tester_speefox(self, test_data):
+        ckpt_path = glob.glob(self.ckpt_dir + '/ckpt_best*')
+        state_dict = torch.load(ckpt_path[0], map_location=self.device)
+        if 'discriminator' in state_dict:
+            self.discriminator.load_state_dict(state_dict['discriminator'])
+            if "pre_projection" in state_dict:
+                self.pre_projection.load_state_dict(state_dict["pre_projection"])
+        else:
+            self.load_state_dict(state_dict, strict=False)
+
+        # images_per_cap, scores_per_cap, masks_per_cap = self.predict_speefox(test_data)
+        # return scores_per_cap, masks_per_cap
+        scores_per_cap = self.predict_speefox(test_data)
+        return scores_per_cap
+    
+    """
+    Speefox 데이터를 평가하는 코드:
+    행에 포함된 5개 데이터에 대해 각각 predict 수행 후,
+    5개 데이터에 대한 Max 값을 기준으로 양/불 판단단 
+    """
+    def predict_speefox(self, test_dataloader):
+        """This function provides anomaly scores/maps for full dataloaders."""
+        self.forward_modules.eval()
+
+        # img_paths = []
+        # images = []
+        # scores = []
+        # masks = []
+        # labels_gt = []
+        
+        # images_per_cap = []
+        scores_per_cap = []
+        masks_per_cap = []
+        with tqdm.tqdm(test_dataloader, desc="Inferring...", leave=False, unit='batch') as data_iterator:
+            for data in data_iterator:
+                if isinstance(data, dict):
+                    image = data["image"]
+                    # images.extend(image.numpy().tolist())
+                _scores, _masks = self._predict(image)
+                
+                holder_scores, holder_masks = [], []
+                for score, mask in zip(_scores, _masks):
+                    holder_scores.append(score)
+                    holder_masks.append(mask)
+                
+                # batch 데이터 중 score가 가장 큰 값만 저장
+                idx_max = np.argmax(holder_scores)
+                # images_per_cap.append(images[idx_max])
+                scores_per_cap.append(holder_scores[idx_max])
+                # masks_per_cap.append(holder_masks[idx_max])
+        # return images_per_cap, scores_per_cap, masks_per_cap
+        return scores_per_cap

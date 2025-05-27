@@ -32,9 +32,9 @@ def main(**kwargs):
 @click.option("--pretrain_embed_dimension", type=int, default=1024)
 @click.option("--target_embed_dimension", type=int, default=1024)
 @click.option("--patchsize", type=int, default=3)
-@click.option("--meta_epochs", type=int, default=640)
+@click.option("--meta_epochs", type=int, default=640) ## 640
 @click.option("--eval_epochs", type=int, default=1)
-@click.option("--dsc_layers", type=int, default=2)
+@click.option("--dsc_layers", type=int, default=4) ## 2
 @click.option("--dsc_hidden", type=int, default=1024)
 @click.option("--pre_proj", type=int, default=1)
 @click.option("--mining", type=int, default=1)
